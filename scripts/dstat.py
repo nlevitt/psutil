@@ -141,6 +141,19 @@ class NetStats:
 
         return result
 
+class MemUsage:
+    # TODO add support for buff/cached (not available on mac)
+
+    def header0(self):
+        return '-mem-usage-'
+
+    def header1(self):
+        return ' used  free'
+
+    def value(self):
+        vm = psutil.virtual_memory()
+        return '%s %s' % (pretty_bytes(vm.used), pretty_bytes(vm.available))
+
 # def print_header():
 #     print('--------system--------- ---load-avg--- ----total-cpu-usage---- -dsk/total- vda- -net/total- ------memory-usage----- ---paging-- ---system--')
 #     print('         time          | 1m   5m  15m |usr sys idl wai hiq siq| read  writ|util| recv  send| used  buff  cach  free|  in   out | int   csw')
@@ -153,7 +166,8 @@ class Dstat:
             LoadAvg(),
             CpuUsage(),
             DiskStats(),
-            NetStats()
+            NetStats(),
+            MemUsage(),
         ]
         self.next_due = time.time() + 1
         self.i = 0
