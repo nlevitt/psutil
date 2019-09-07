@@ -77,6 +77,70 @@ class CpuUsage:
         result = ' '.join(('%.3f' % t)[:3] for t in cputimes)
         return result
 
+def pretty_bytes(num, b=' '):
+    for x in [b, 'k', 'm', 'g', 't', 'p']:
+        if num < 1024.0:
+            return "%4.0f%s" % (num, x)
+        num /= 1024.0
+
+class DiskStats:
+    def __init__(self):
+        self.last_time = time.time()
+        self.last_values = psutil.disk_io_counters()
+
+    def header0(self):
+        return '-dsk/total-'
+
+    def header1(self):
+        return ' read  writ'
+
+    def value(self):
+        t = time.time()
+        values = psutil.disk_io_counters()
+
+        elapsed = t - self.last_time
+        read_bytes = values.read_bytes - self.last_values.read_bytes
+        write_bytes = values.write_bytes - self.last_values.write_bytes
+
+        read_rate = pretty_bytes(read_bytes / elapsed)
+        write_rate = pretty_bytes(write_bytes / elapsed)
+
+        result = '%s %s' % (read_rate, write_rate)
+
+        self.last_time = t
+        self.last_values = values
+
+        return result
+
+class NetStats:
+    def __init__(self):
+        self.last_time = time.time()
+        self.last_values = psutil.net_io_counters()
+
+    def header0(self):
+        return '-net/total-'
+
+    def header1(self):
+        return ' recv  send'
+
+    def value(self):
+        t = time.time()
+        values = psutil.net_io_counters()
+
+        elapsed = t - self.last_time
+        bytes_recv = values.bytes_recv - self.last_values.bytes_recv
+        bytes_sent = values.bytes_sent - self.last_values.bytes_sent
+
+        recv_rate = pretty_bytes(bytes_recv / elapsed, 'B')
+        send_rate = pretty_bytes(bytes_sent / elapsed, 'B')
+
+        result = '%s %s' % (recv_rate, send_rate)
+
+        self.last_time = t
+        self.last_values = values
+
+        return result
+
 # def print_header():
 #     print('--------system--------- ---load-avg--- ----total-cpu-usage---- -dsk/total- vda- -net/total- ------memory-usage----- ---paging-- ---system--')
 #     print('         time          | 1m   5m  15m |usr sys idl wai hiq siq| read  writ|util| recv  send| used  buff  cach  free|  in   out | int   csw')
@@ -88,6 +152,8 @@ class Dstat:
             Time(),
             LoadAvg(),
             CpuUsage(),
+            DiskStats(),
+            NetStats()
         ]
         self.next_due = time.time() + 1
         self.i = 0
