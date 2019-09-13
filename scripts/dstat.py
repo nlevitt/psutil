@@ -77,11 +77,20 @@ class CpuUsage:
         result = ' '.join(('%.3f' % t)[:3] for t in cputimes)
         return result
 
-def pretty_bytes(num, b=' '):
-    for x in [b, 'k', 'm', 'g', 't', 'p']:
-        if num < 1024.0:
-            return "%4.0f%s" % (num, x)
-        num /= 1024.0
+def pretty_bytes(value, width=None, b=' '):
+    for unit in [b, 'k', 'm', 'g', 't', 'p']:
+        if value < 1024.0 or unit == 'p':
+            break
+        value /= 1024.0
+    if value == 0:
+        number = '0'
+    else:
+        number = '%.1f' % value
+    if width:
+        number = number[:width-1]
+        if len(number) + 1 < width:
+            number = ' ' * (width - len(number) - 1) + number
+    return number + unit
 
 class DiskStats:
     def __init__(self):
@@ -102,8 +111,8 @@ class DiskStats:
         read_bytes = values.read_bytes - self.last_values.read_bytes
         write_bytes = values.write_bytes - self.last_values.write_bytes
 
-        read_rate = pretty_bytes(read_bytes / elapsed)
-        write_rate = pretty_bytes(write_bytes / elapsed)
+        read_rate = pretty_bytes(read_bytes / elapsed, 5)
+        write_rate = pretty_bytes(write_bytes / elapsed, 5)
 
         result = '%s %s' % (read_rate, write_rate)
 
@@ -131,8 +140,8 @@ class NetStats:
         bytes_recv = values.bytes_recv - self.last_values.bytes_recv
         bytes_sent = values.bytes_sent - self.last_values.bytes_sent
 
-        recv_rate = pretty_bytes(bytes_recv / elapsed, 'B')
-        send_rate = pretty_bytes(bytes_sent / elapsed, 'B')
+        recv_rate = pretty_bytes(bytes_recv / elapsed, 5)
+        send_rate = pretty_bytes(bytes_sent / elapsed, 5)
 
         result = '%s %s' % (recv_rate, send_rate)
 
@@ -152,7 +161,65 @@ class MemUsage:
 
     def value(self):
         vm = psutil.virtual_memory()
-        return '%s %s' % (pretty_bytes(vm.used), pretty_bytes(vm.available))
+        return '%s %s' % (
+                pretty_bytes(vm.used, 5),
+                pretty_bytes(vm.available, 5))
+
+class Paging:
+    def __init__(self):
+        self.last_time = time.time()
+        self.last_values = psutil.swap_memory()
+
+    def header0(self):
+        return '---paging--'
+
+    def header1(self):
+        return '  in   out '
+
+    def value(self):
+        t = time.time()
+        values = psutil.swap_memory()
+
+        elapsed = t - self.last_time
+        sin = values.sin - self.last_values.sin
+        sout = values.sout - self.last_values.sout
+
+        sin_rate = pretty_bytes(sin / elapsed, 5)
+        sout_rate = pretty_bytes(sout / elapsed, 5)
+
+        result = '%s %s' % (sin_rate, sout_rate)
+
+        self.last_values = values
+
+        return result
+
+class System:
+    def __init__(self):
+        self.last_time = time.time()
+        self.last_values = psutil.cpu_stats()
+
+    def header0(self):
+        return '---system--'
+
+    def header1(self):
+        return ' int   csw'
+
+    def value(self):
+        t = time.time()
+        values = psutil.cpu_stats()
+
+        elapsed = t - self.last_time
+        ctx_switches = values.ctx_switches - self.last_values.ctx_switches
+        interrupts = values.interrupts - self.last_values.interrupts
+
+        csw_rate = pretty_bytes(ctx_switches / elapsed, 5)
+        int_rate = pretty_bytes(interrupts / elapsed, 5)
+
+        result = '%s %s' % (int_rate, csw_rate)
+
+        self.last_values = values
+
+        return result
 
 # def print_header():
 #     print('--------system--------- ---load-avg--- ----total-cpu-usage---- -dsk/total- vda- -net/total- ------memory-usage----- ---paging-- ---system--')
@@ -168,19 +235,21 @@ class Dstat:
             DiskStats(),
             NetStats(),
             MemUsage(),
+            Paging(),
+            System(),
         ]
-        self.next_due = time.time() + 1
-        self.i = 0
 
     def run(self):
+        time.sleep(0.2)
+        self.next_due = time.time()
         self.i = 0
         while True:
-            time.sleep(max(0, self.next_due - time.time()))
-            self.next_due = self.next_due + 1
             if self.i % self.header_interval == 0:
                 self.print_header()
             self.print_stats_line()
             self.i += 1
+            self.next_due = self.next_due + 1
+            time.sleep(max(0, self.next_due - time.time()))
 
     def print_header(self):
         print(' '.join(stat.header0() for stat in self.stats))
