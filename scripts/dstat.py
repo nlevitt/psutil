@@ -50,23 +50,6 @@ class Statistic(abc.ABC):
         result = HEAT_COLORS[self.heat_level()] + value_str + ANSI_ESCAPES['reset'] + self.unit
         return result
 
-class Load(Statistic):
-    def __init__(self, value):
-        super().__init__(value, unit='', width=4)
-
-    def heat_level(self):
-        # :shrug:
-        if self.value < 0.5:
-            return 0
-        elif self.value < 1:
-            return 1
-        elif self.value < 2:
-            return 2
-        elif self.value < 5:
-            return 3
-        else:
-            return 4
-
 # === mac ===
 # >>> psutil.cpu_stats()
 # scpustats(ctx_switches=16581, interrupts=656044, soft_interrupts=779785455, syscalls=578372)
@@ -87,6 +70,23 @@ class Time:
     def value(self):
         return datetime.datetime.now().isoformat(timespec='milliseconds')
 
+class Load(Statistic):
+    def __init__(self, value):
+        super().__init__(value, unit='', width=4)
+
+    def heat_level(self):
+        # :shrug:
+        if self.value < 0.5:
+            return 0
+        elif self.value < 1:
+            return 1
+        elif self.value < 2:
+            return 2
+        elif self.value < 5:
+            return 3
+        else:
+            return 4
+
 class LoadAvg:
     def header0(self):
         return '---load-avg---'
@@ -95,6 +95,25 @@ class LoadAvg:
     def value(self):
         loads = (Load(load).to_str() for load in psutil.getloadavg())
         return ' '.join(loads)
+
+class CpuTime(Statistic):
+    def __init__(self, name, value):
+        self.name = name
+        super().__init__(value, unit='', width=3)
+
+    def heat_level(self):
+        if self.name == 'idle':
+            return 0
+        elif self.value < 5:
+            return 0
+        elif self.value < 15:
+            return 1
+        elif self.value < 35:
+            return 2
+        elif self.value < 70:
+            return 3
+        else:
+            return 4
 
 class CpuUsage:
     # === mac ===
@@ -132,7 +151,10 @@ class CpuUsage:
 
     def value(self):
         cputimes = psutil.cpu_times_percent()
-        result = ' '.join(('%.3f' % t)[:3] for t in cputimes)
+        formatted_cputimes = (
+                CpuTime(name, value).to_str()
+                for name, value in cputimes._asdict().items())
+        result = ' '.join(formatted_cputimes)
         return result
 
 def pretty_bytes(value, width=None, b=' '):
