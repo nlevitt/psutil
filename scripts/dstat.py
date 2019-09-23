@@ -18,7 +18,8 @@ ANSI_ESCAPES = {
     'blue': '\033[0;34m',
     'magenta': '\033[0;35m',
     'cyan': '\033[0;36m',
-    'grey': '\033[0;37m',
+    'lightgrey': '\033[0;37m',
+    'darkgrey': '\033[0;90m',
     'reset': '\033[0;0m',
     'underline': '\033[4m',
     'bold': '\033[1m',
@@ -48,8 +49,18 @@ class Statistic(abc.ABC):
         raise NotImplementedError
 
     def to_str(self):
-        value_str = ('%.6f' % self.value)[:self.value_width]
-        result = HEAT_COLORS[self.heat_level()] + value_str + ANSI_ESCAPES['reset'] + self.unit
+        if self.value == 0: # int or float
+            value_str = ' ' * (self.value_width - 1) + '0'
+        elif isinstance(self.value, int):
+            value_str = '% *d' % (self.value_width, self.value)
+        else:
+            value_str = ('%.6f' % self.value)[:self.value_width]
+        result = HEAT_COLORS[self.heat_level()] \
+                + value_str \
+                + ANSI_ESCAPES['reset'] \
+                + ANSI_ESCAPES['darkgrey'] + ANSI_ESCAPES['bold'] \
+                + self.unit \
+                + ANSI_ESCAPES['reset']
         return result
 
 # === mac ===
@@ -70,7 +81,7 @@ class Time:
     def header1(self):
         return '         time          '
     def value(self):
-        return datetime.datetime.now().isoformat(timespec='milliseconds')
+        return ANSI_ESCAPES['darkgrey'] + datetime.datetime.now().isoformat(timespec='milliseconds') + ANSI_ESCAPES['reset']
 
 class Load(Statistic):
     def __init__(self, value):
@@ -117,6 +128,12 @@ class CpuTime(Statistic):
         else:
             return 4
 
+    def to_str(self):
+        if self.value == 0:
+            return '0.0'
+        else:
+            return super().to_str()
+
 class CpuUsage:
     # === mac ===
     # >>> psutil.cpu_times_percent()
@@ -159,20 +176,33 @@ class CpuUsage:
         result = ' '.join(formatted_cputimes)
         return result
 
-def pretty_bytes(value, width=None, b=' '):
+# def pretty_bytes(value, width=None, b=' '):
+def pretty_bytes(value, b=' '):
+    '''
+    Returns tuple (value, unit)
+    '''
+    number = value
     for unit in [b, 'k', 'm', 'g', 't', 'p']:
-        if value < 1024.0 or unit == 'p':
+        if number < 1024.0 or unit == 'p':
             break
-        value /= 1024.0
-    if value == 0:
-        number = '0'
-    else:
-        number = '%.1f' % value
-    if width:
-        number = number[:width-1]
-        if len(number) + 1 < width:
-            number = ' ' * (width - len(number) - 1) + number
-    return number + unit
+        number /= 1024.0
+    # if value == 0:
+    #     number = '0'
+    # else:
+    #     number = '%.1f' % value
+    # if width:
+    #     number = number[:width-1]
+    #     if len(number) + 1 < width:
+    #         number = ' ' * (width - len(number) - 1) + number
+    return number, unit
+
+class DiskStat(Statistic):
+    def __init__(self, value):
+        number, unit = pretty_bytes(value)
+        super().__init__(number, unit=unit, width=5)
+
+    def heat_level(self):
+        return 0
 
 class DiskStats:
     def __init__(self):
@@ -193,15 +223,21 @@ class DiskStats:
         read_bytes = values.read_bytes - self.last_values.read_bytes
         write_bytes = values.write_bytes - self.last_values.write_bytes
 
-        read_rate = pretty_bytes(read_bytes / elapsed, 5)
-        write_rate = pretty_bytes(write_bytes / elapsed, 5)
-
-        result = '%s %s' % (read_rate, write_rate)
+        result = DiskStat(read_bytes / elapsed).to_str() \
+                + ' ' + DiskStat(write_bytes / elapsed).to_str()
 
         self.last_time = t
         self.last_values = values
 
         return result
+
+class NetStat(Statistic):
+    def __init__(self, value):
+        number, unit = pretty_bytes(value)
+        super().__init__(number, unit=unit, width=5)
+
+    def heat_level(self):
+        return 0
 
 class NetStats:
     def __init__(self):
@@ -222,10 +258,8 @@ class NetStats:
         bytes_recv = values.bytes_recv - self.last_values.bytes_recv
         bytes_sent = values.bytes_sent - self.last_values.bytes_sent
 
-        recv_rate = pretty_bytes(bytes_recv / elapsed, 5)
-        send_rate = pretty_bytes(bytes_sent / elapsed, 5)
-
-        result = '%s %s' % (recv_rate, send_rate)
+        result = NetStat(bytes_recv / elapsed).to_str() \
+                + ' ' + NetStat(bytes_sent / elapsed).to_str()
 
         self.last_time = t
         self.last_values = values
@@ -339,7 +373,6 @@ class Dstat:
             while True:
                 next_i = int(time.time() - start + 1)
                 next_due = start + next_i
-                # print("i=%s next_due=%s" % (i, next_due))
                 time.sleep(max(0, next_due - time.time()))
                 if time.time() - next_due < 0.1:
                     break
@@ -350,7 +383,7 @@ class Dstat:
     def print_header(self):
         print(ANSI_ESCAPES['blue'] + ' '.join(stat.header0() for stat in self.stats) + ANSI_ESCAPES['reset'])
         print(Dstat.COLUMN_DELIM.join(
-            ansi_nonspace(
+            highlight_nonspace(
                 stat.header1(), ANSI_ESCAPES['blue']
                 + ANSI_ESCAPES['underline'] + ANSI_ESCAPES['bold'])
             for stat in self.stats))
@@ -363,7 +396,11 @@ class Dstat:
             line += ' missed %s ticks' % missed_ticks
         print(line)
 
-def ansi_nonspace(string, ansi_escape):
+def highlight_nonspace(string, ansi_escape):
+    '''
+    Creates a new string that prepends non-space sections of `string` with
+    `ansi_escape` postpends them with `ANSI_ESCAPES['reset']`.
+    '''
     new_string = ''
     for i in range(len(string)):
         if i > 0 and string[i] == ' ' and string[i-1] != ' ':
