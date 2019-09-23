@@ -20,6 +20,8 @@ ANSI_ESCAPES = {
     'cyan': '\033[0;36m',
     'grey': '\033[0;37m',
     'reset': '\033[0;0m',
+    'underline': '\033[4m',
+    'bold': '\033[1m',
 }
 
 HEAT_COLORS = [
@@ -308,10 +310,6 @@ class System:
 
         return result
 
-# def print_header():
-#     print('--------system--------- ---load-avg--- ----total-cpu-usage---- -dsk/total- vda- -net/total- ------memory-usage----- ---paging-- ---system--')
-#     print('         time          | 1m   5m  15m |usr sys idl wai hiq siq| read  writ|util| recv  send| used  buff  cach  free|  in   out | int   csw')
-
 class Dstat:
     def __init__(self):
         self.header_interval = shutil.get_terminal_size(fallback=(80, 25)).lines - 3
@@ -348,17 +346,33 @@ class Dstat:
             missed_ticks = next_i - (i + 1)
             i = next_i
 
+    COLUMN_DELIM = ANSI_ESCAPES['blue'] + '|' + ANSI_ESCAPES['reset']
     def print_header(self):
         print(ANSI_ESCAPES['blue'] + ' '.join(stat.header0() for stat in self.stats) + ANSI_ESCAPES['reset'])
-        print(ANSI_ESCAPES['blue'] + '|'.join(stat.header1() for stat in self.stats) + ANSI_ESCAPES['reset'])
+        print(Dstat.COLUMN_DELIM.join(
+            ansi_nonspace(
+                stat.header1(), ANSI_ESCAPES['blue']
+                + ANSI_ESCAPES['underline'] + ANSI_ESCAPES['bold'])
+            for stat in self.stats))
 
     def print_stats_line(self, missed_ticks):
-        line = '|'.join(stat.value() for stat in self.stats)
+        line = Dstat.COLUMN_DELIM.join(stat.value() for stat in self.stats)
         if missed_ticks == 1:
             line += ' missed 1 tick'
         elif missed_ticks > 1:
             line += ' missed %s ticks' % missed_ticks
         print(line)
+
+def ansi_nonspace(string, ansi_escape):
+    new_string = ''
+    for i in range(len(string)):
+        if i > 0 and string[i] == ' ' and string[i-1] != ' ':
+            new_string += ANSI_ESCAPES['reset']
+        elif string[i] != ' ' and (i == 0 or string[i-1] == ' '):
+            new_string += ansi_escape
+        new_string += string[i]
+    new_string += ANSI_ESCAPES['reset']
+    return new_string
 
 def term_has_color():
     "Return whether the system can use colors or not"
