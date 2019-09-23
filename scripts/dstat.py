@@ -8,6 +8,64 @@ import datetime
 import psutil
 import shutil
 import signal
+import abc
+
+ANSI_ESCAPES = {
+    'black': '\033[0;30m',
+    'red': '\033[0;31m',
+    'green': '\033[0;32m',
+    'yellow': '\033[0;33m',
+    'blue': '\033[0;34m',
+    'magenta': '\033[0;35m',
+    'cyan': '\033[0;36m',
+    'grey': '\033[0;37m',
+    'reset': '\033[0;0m',
+}
+
+HEAT_COLORS = [
+    ANSI_ESCAPES['blue'],   # (4)
+    ANSI_ESCAPES['cyan'],   # (6)
+    ANSI_ESCAPES['green'],  # (2)
+    ANSI_ESCAPES['yellow'], # (3)
+    ANSI_ESCAPES['red'],    # (1)
+]
+
+# base class for a single statistic
+class Statistic(abc.ABC):
+    def __init__(self, value, unit, width):
+        self.value = value
+        self.unit = unit
+        self.width = width
+        self.value_width = width - len(unit)
+
+    @abc.abstractmethod
+    def heat_level(self):
+        '''
+        Returns a value between 0 (blue) and 4 (red)
+        '''
+        raise NotImplementedError
+
+    def to_str(self):
+        value_str = ('%.6f' % self.value)[:self.value_width]
+        result = HEAT_COLORS[self.heat_level()] + value_str + ANSI_ESCAPES['reset'] + self.unit
+        return result
+
+class Load(Statistic):
+    def __init__(self, value):
+        super().__init__(value, unit='', width=4)
+
+    def heat_level(self):
+        # :shrug:
+        if self.value < 0.5:
+            return 0
+        elif self.value < 1:
+            return 1
+        elif self.value < 2:
+            return 2
+        elif self.value < 5:
+            return 3
+        else:
+            return 4
 
 # === mac ===
 # >>> psutil.cpu_stats()
@@ -35,7 +93,7 @@ class LoadAvg:
     def header1(self):
         return ' 1m   5m  15m '
     def value(self):
-        loads = (('%.3f' % load)[:4] for load in psutil.getloadavg())
+        loads = (Load(load).to_str() for load in psutil.getloadavg())
         return ' '.join(loads)
 
 class CpuUsage:
@@ -212,8 +270,15 @@ class System:
         ctx_switches = values.ctx_switches - self.last_values.ctx_switches
         interrupts = values.interrupts - self.last_values.interrupts
 
-        csw_rate = pretty_bytes(ctx_switches / elapsed, 5)
-        int_rate = pretty_bytes(interrupts / elapsed, 5)
+        if psutil.MACOS:
+            # not sure what these numbers mean exactly on mac
+            # see https://github.com/giampaolo/psutil/issues/847
+            # and https://developer.apple.com/documentation/kernel/1502546-host_statistics
+            csw_rate = pretty_bytes(values.ctx_switches, 5)
+            int_rate = pretty_bytes(values.interrupts, 5)
+        else:
+            csw_rate = pretty_bytes(ctx_switches / elapsed, 5)
+            int_rate = pretty_bytes(interrupts / elapsed, 5)
 
         result = '%s %s' % (int_rate, csw_rate)
 
@@ -241,22 +306,54 @@ class Dstat:
 
     def run(self):
         time.sleep(0.2)
-        self.next_due = time.time()
-        self.i = 0
+        start = time.time()
+        row = 0
+        i = 0
+        missed_ticks = 0
         while True:
-            if self.i % self.header_interval == 0:
+            if row % self.header_interval == 0:
                 self.print_header()
-            self.print_stats_line()
-            self.i += 1
-            self.next_due = self.next_due + 1
-            time.sleep(max(0, self.next_due - time.time()))
+                row = 0
+            self.print_stats_line(missed_ticks)
+            row += 1
+            while True:
+                next_i = int(time.time() - start + 1)
+                next_due = start + next_i
+                # print("i=%s next_due=%s" % (i, next_due))
+                time.sleep(max(0, next_due - time.time()))
+                if time.time() - next_due < 0.1:
+                    break
+            missed_ticks = next_i - (i + 1)
+            i = next_i
 
     def print_header(self):
-        print(' '.join(stat.header0() for stat in self.stats))
-        print('|'.join(stat.header1() for stat in self.stats))
+        print(ANSI_ESCAPES['blue'] + ' '.join(stat.header0() for stat in self.stats) + ANSI_ESCAPES['reset'])
+        print(ANSI_ESCAPES['blue'] + '|'.join(stat.header1() for stat in self.stats) + ANSI_ESCAPES['reset'])
 
-    def print_stats_line(self):
-        print('|'.join(stat.value() for stat in self.stats))
+    def print_stats_line(self, missed_ticks):
+        line = '|'.join(stat.value() for stat in self.stats)
+        if missed_ticks == 1:
+            line += ' missed 1 tick'
+        elif missed_ticks > 1:
+            line += ' missed %s ticks' % missed_ticks
+        print(line)
+
+def term_has_color():
+    "Return whether the system can use colors or not"
+    if sys.stdout.isatty():
+        try:
+            import curses
+            curses.setupterm()
+            if curses.tigetnum('colors') < 0:
+                return False
+        except ImportError:
+            print('Color support is disabled as python-curses is not installed.', file=sys.stderr)
+            return False
+        except:
+            print('Color support is disabled as curses does not find terminal "%s".' % os.getenv('TERM'), file=sys.stderr)
+            return False
+        return True
+    return False
 
 def main(argv=None):
     argv = argv or sys.argv
