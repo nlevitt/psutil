@@ -83,7 +83,7 @@ class Time:
     def value(self):
         return ANSI_ESCAPES['darkgrey'] + datetime.datetime.now().isoformat(timespec='milliseconds') + ANSI_ESCAPES['reset']
 
-class Load(Statistic):
+class LoadAvg(Statistic):
     def __init__(self, value):
         super().__init__(value, unit='', width=4)
 
@@ -100,13 +100,13 @@ class Load(Statistic):
         else:
             return 4
 
-class LoadAvg:
+class LoadAvgs:
     def header0(self):
         return '---load-avg---'
     def header1(self):
         return ' 1m   5m  15m '
     def value(self):
-        loads = (Load(load).to_str() for load in psutil.getloadavg())
+        loads = (LoadAvg(load).to_str() for load in psutil.getloadavg())
         return ' '.join(loads)
 
 class CpuTime(Statistic):
@@ -134,7 +134,7 @@ class CpuTime(Statistic):
         else:
             return super().to_str()
 
-class CpuUsage:
+class CpuTimes:
     # === mac ===
     # >>> psutil.cpu_times_percent()
     # scputimes(user=8.6, nice=0.0, system=3.3, idle=88.0)
@@ -266,7 +266,15 @@ class NetStats:
 
         return result
 
-class MemUsage:
+class MemUsage(Statistic):
+    def __init__(self, value):
+        number, unit = pretty_bytes(value)
+        super().__init__(number, unit=unit, width=5)
+
+    def heat_level(self):
+        return 0
+
+class MemUsages:
     # TODO add support for buff/cached (not available on mac)
 
     def header0(self):
@@ -277,9 +285,15 @@ class MemUsage:
 
     def value(self):
         vm = psutil.virtual_memory()
-        return '%s %s' % (
-                pretty_bytes(vm.used, 5),
-                pretty_bytes(vm.available, 5))
+        return MemUsage(vm.used).to_str() + ' ' + MemUsage(vm.available).to_str()
+
+class PagingStat(Statistic):
+    def __init__(self, value):
+        number, unit = pretty_bytes(value)
+        super().__init__(number, unit=unit, width=5)
+
+    def heat_level(self):
+        return 0
 
 class Paging:
     def __init__(self):
@@ -300,10 +314,12 @@ class Paging:
         sin = values.sin - self.last_values.sin
         sout = values.sout - self.last_values.sout
 
-        sin_rate = pretty_bytes(sin / elapsed, 5)
-        sout_rate = pretty_bytes(sout / elapsed, 5)
+        # sin_rate = pretty_bytes(sin / elapsed, 5)
+        # sout_rate = pretty_bytes(sout / elapsed, 5)
 
-        result = '%s %s' % (sin_rate, sout_rate)
+        # result = '%s %s' % (sin_rate, sout_rate)
+        result = PagingStat(sin / elapsed).to_str() \
+                + ' ' + PagingStat(sout / elapsed).to_str()
 
         self.last_values = values
 
@@ -349,13 +365,13 @@ class Dstat:
         self.header_interval = shutil.get_terminal_size(fallback=(80, 25)).lines - 3
         self.stats = [
             Time(),
-            LoadAvg(),
-            CpuUsage(),
+            LoadAvgs(),
+            CpuTimes(),
             DiskStats(),
             NetStats(),
-            MemUsage(),
+            MemUsages(),
             Paging(),
-            System(),
+            # System(),
         ]
 
     def run(self):
