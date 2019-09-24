@@ -24,6 +24,11 @@ ANSI_ESCAPES = {
     'underline': '\033[4m',
     'bold': '\033[1m',
 }
+BLUE = ANSI_ESCAPES['blue']
+RESET = ANSI_ESCAPES['reset']
+BOLD = ANSI_ESCAPES['bold']
+UNDERLINE = ANSI_ESCAPES['underline']
+DARKGREY = ANSI_ESCAPES['darkgrey']
 
 HEAT_COLORS = [
     ANSI_ESCAPES['blue'],   # (4)
@@ -55,12 +60,8 @@ class Statistic(abc.ABC):
             value_str = '% *d' % (self.value_width, self.value)
         else:
             value_str = ('%.6f' % self.value)[:self.value_width]
-        result = HEAT_COLORS[self.heat_level()] \
-                + value_str \
-                + ANSI_ESCAPES['reset'] \
-                + ANSI_ESCAPES['darkgrey'] + ANSI_ESCAPES['bold'] \
-                + self.unit \
-                + ANSI_ESCAPES['reset']
+        result = HEAT_COLORS[self.heat_level()] + BOLD + value_str \
+                + RESET + DARKGREY + BOLD + self.unit + RESET
         return result
 
 # === mac ===
@@ -79,9 +80,9 @@ class Time:
     def header0(self):
         return '--------system---------'
     def header1(self):
-        return '         time          '
+        return ('         time          ',)
     def value(self):
-        return ANSI_ESCAPES['darkgrey'] + datetime.datetime.now().isoformat(timespec='milliseconds') + ANSI_ESCAPES['reset']
+        return DARKGREY + datetime.datetime.now().isoformat(timespec='milliseconds') + RESET
 
 class LoadAvg(Statistic):
     def __init__(self, value):
@@ -104,7 +105,7 @@ class LoadAvgs:
     def header0(self):
         return '---load-avg---'
     def header1(self):
-        return ' 1m   5m  15m '
+        return ' 1m ', ' 5m ', ' 15m'
     def value(self):
         loads = (LoadAvg(load).to_str() for load in psutil.getloadavg())
         return ' '.join(loads)
@@ -130,7 +131,7 @@ class CpuTime(Statistic):
 
     def to_str(self):
         if self.value == 0:
-            return '0.0'
+            return BOLD + HEAT_COLORS[0] + '0.0' + RESET
         else:
             return super().to_str()
 
@@ -157,9 +158,8 @@ class CpuTimes:
 
     def __init__(self):
         cputimes = psutil.cpu_times_percent()
-        abbrs = [self.ABBRS[f] for f in cputimes._fields]
-        self._header1 = ' '.join(abbrs)
-        space_to_fill = len(self._header1) - len('total-cpu-usage')
+        self._header1 = [self.ABBRS[f] for f in cputimes._fields]
+        space_to_fill = 4 * len(self._header1) - 1 - len('total-cpu-usage')
         self._header0 = '-' * (space_to_fill // 2) + 'total-cpu-usage' + '-' * (space_to_fill // 2)
 
     def header0(self):
@@ -213,7 +213,7 @@ class DiskStats:
         return '-dsk/total-'
 
     def header1(self):
-        return ' read  writ'
+        return ' read', ' writ'
 
     def value(self):
         t = time.time()
@@ -248,7 +248,7 @@ class NetStats:
         return '-net/total-'
 
     def header1(self):
-        return ' recv  send'
+        return ' recv', ' send'
 
     def value(self):
         t = time.time()
@@ -281,7 +281,7 @@ class MemUsages:
         return '-mem-usage-'
 
     def header1(self):
-        return ' used  free'
+        return ' used', ' free'
 
     def value(self):
         vm = psutil.virtual_memory()
@@ -304,7 +304,7 @@ class Paging:
         return '---paging--'
 
     def header1(self):
-        return '  in   out '
+        return '  in ', '  out '
 
     def value(self):
         t = time.time()
@@ -314,10 +314,6 @@ class Paging:
         sin = values.sin - self.last_values.sin
         sout = values.sout - self.last_values.sout
 
-        # sin_rate = pretty_bytes(sin / elapsed, 5)
-        # sout_rate = pretty_bytes(sout / elapsed, 5)
-
-        # result = '%s %s' % (sin_rate, sout_rate)
         result = PagingStat(sin / elapsed).to_str() \
                 + ' ' + PagingStat(sout / elapsed).to_str()
 
@@ -334,7 +330,7 @@ class System:
         return '---system--'
 
     def header1(self):
-        return ' int   csw'
+        return ' int ', ' csw '
 
     def value(self):
         t = time.time()
@@ -395,14 +391,17 @@ class Dstat:
             missed_ticks = next_i - (i + 1)
             i = next_i
 
-    COLUMN_DELIM = ANSI_ESCAPES['blue'] + '|' + ANSI_ESCAPES['reset']
+    COLUMN_DELIM = BLUE + '|' + RESET
     def print_header(self):
-        print(ANSI_ESCAPES['blue'] + ' '.join(stat.header0() for stat in self.stats) + ANSI_ESCAPES['reset'])
-        print(Dstat.COLUMN_DELIM.join(
-            highlight_nonspace(
-                stat.header1(), ANSI_ESCAPES['blue']
-                + ANSI_ESCAPES['underline'] + ANSI_ESCAPES['bold'])
-            for stat in self.stats))
+        header0 = BLUE + ' '.join(stat.header0() for stat in self.stats) + RESET
+
+        substat_delim = RESET + ' ' + BLUE + UNDERLINE + BOLD
+        header1 = Dstat.COLUMN_DELIM.join(
+                (BLUE + UNDERLINE + BOLD + substat_delim.join(stat.header1()) + RESET)
+                for stat in self.stats)
+
+        print(header0)
+        print(header1)
 
     def print_stats_line(self, missed_ticks):
         line = Dstat.COLUMN_DELIM.join(stat.value() for stat in self.stats)
@@ -412,37 +411,22 @@ class Dstat:
             line += ' missed %s ticks' % missed_ticks
         print(line)
 
-def highlight_nonspace(string, ansi_escape):
-    '''
-    Creates a new string that prepends non-space sections of `string` with
-    `ansi_escape` postpends them with `ANSI_ESCAPES['reset']`.
-    '''
-    new_string = ''
-    for i in range(len(string)):
-        if i > 0 and string[i] == ' ' and string[i-1] != ' ':
-            new_string += ANSI_ESCAPES['reset']
-        elif string[i] != ' ' and (i == 0 or string[i-1] == ' '):
-            new_string += ansi_escape
-        new_string += string[i]
-    new_string += ANSI_ESCAPES['reset']
-    return new_string
-
-def term_has_color():
-    "Return whether the system can use colors or not"
-    if sys.stdout.isatty():
-        try:
-            import curses
-            curses.setupterm()
-            if curses.tigetnum('colors') < 0:
-                return False
-        except ImportError:
-            print('Color support is disabled as python-curses is not installed.', file=sys.stderr)
-            return False
-        except:
-            print('Color support is disabled as curses does not find terminal "%s".' % os.getenv('TERM'), file=sys.stderr)
-            return False
-        return True
-    return False
+# def term_has_color():
+#     "Return whether the system can use colors or not"
+#     if sys.stdout.isatty():
+#         try:
+#             import curses
+#             curses.setupterm()
+#             if curses.tigetnum('colors') < 0:
+#                 return False
+#         except ImportError:
+#             print('Color support is disabled as python-curses is not installed.', file=sys.stderr)
+#             return False
+#         except:
+#             print('Color support is disabled as curses does not find terminal "%s".' % os.getenv('TERM'), file=sys.stderr)
+#             return False
+#         return True
+#     return False
 
 def main(argv=None):
     argv = argv or sys.argv
