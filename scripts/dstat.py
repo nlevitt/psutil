@@ -116,9 +116,10 @@ class CpuTime(Statistic):
         super().__init__(value, unit='', width=3)
 
     def heat_level(self):
-        if self.name == 'idle':
-            return 0
-        elif self.value < 5:
+        # if self.name == 'idle':
+        #     return 0
+        # elif self.value < 5:
+        if self.value < 5:
             return 0
         elif self.value < 15:
             return 1
@@ -131,7 +132,7 @@ class CpuTime(Statistic):
 
     def to_str(self):
         if self.value == 0:
-            return BOLD + HEAT_COLORS[0] + '0.0' + RESET
+            return HEAT_COLORS[0] + BOLD + '0.0' + RESET
         else:
             return super().to_str()
 
@@ -176,7 +177,6 @@ class CpuTimes:
         result = ' '.join(formatted_cputimes)
         return result
 
-# def pretty_bytes(value, width=None, b=' '):
 def pretty_bytes(value, b=' '):
     '''
     Returns tuple (value, unit)
@@ -186,23 +186,25 @@ def pretty_bytes(value, b=' '):
         if number < 1024.0 or unit == 'p':
             break
         number /= 1024.0
-    # if value == 0:
-    #     number = '0'
-    # else:
-    #     number = '%.1f' % value
-    # if width:
-    #     number = number[:width-1]
-    #     if len(number) + 1 < width:
-    #         number = ' ' * (width - len(number) - 1) + number
     return number, unit
 
 class DiskStat(Statistic):
     def __init__(self, value):
+        self.raw_value = value
         number, unit = pretty_bytes(value)
         super().__init__(number, unit=unit, width=5)
 
     def heat_level(self):
-        return 0
+        if self.raw_value < 10 * 1024:
+            return 0
+        elif self.raw_value < 200 * 1024:
+            return 1
+        elif self.raw_value < 1024 * 1024:
+            return 2
+        elif self.raw_value < 10 * 1024 * 1024:
+            return 3
+        else:
+            return 4
 
 class DiskStats:
     def __init__(self):
@@ -233,11 +235,21 @@ class DiskStats:
 
 class NetStat(Statistic):
     def __init__(self, value):
+        self.raw_value = value
         number, unit = pretty_bytes(value)
         super().__init__(number, unit=unit, width=5)
 
     def heat_level(self):
-        return 0
+        if self.raw_value < 10 * 1024:
+            return 0
+        elif self.raw_value < 100 * 1024:
+            return 1
+        elif self.raw_value < 768 * 1024:
+            return 2
+        elif self.raw_value < 2 * 1024 * 1024:
+            return 3
+        else:
+            return 4
 
 class NetStats:
     def __init__(self):
@@ -289,11 +301,22 @@ class MemUsages:
 
 class PagingStat(Statistic):
     def __init__(self, value):
+        self.raw_value = value
+        # super().__init__(value, '', width=5)
         number, unit = pretty_bytes(value)
         super().__init__(number, unit=unit, width=5)
 
     def heat_level(self):
-        return 0
+        if self.raw_value < 1024:
+            return 0
+        elif self.raw_value < 10 * 1024:
+            return 1
+        elif self.raw_value < 100 * 1024:
+            return 2
+        elif self.raw_value < 1024 * 1024:
+            return 3
+        else:
+            return 4
 
 class Paging:
     def __init__(self):
@@ -314,10 +337,11 @@ class Paging:
         sin = values.sin - self.last_values.sin
         sout = values.sout - self.last_values.sout
 
-        result = PagingStat(sin / elapsed).to_str() \
-                + ' ' + PagingStat(sout / elapsed).to_str()
+        result = PagingStat(int(sin / elapsed)).to_str() \
+                + ' ' + PagingStat(int(sout / elapsed)).to_str()
 
         self.last_values = values
+        self.last_time = t
 
         return result
 
